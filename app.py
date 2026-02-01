@@ -1,75 +1,31 @@
 import streamlit as st
-import pickle
-import numpy as np
 import cv2
+import numpy as np
+import joblib
 from PIL import Image
+import os
 
-# =========================
-# Custom class (must match what was used in training)
-# =========================
-class BackgroundSubtractionSVM:
-    def __init__(self):
-        # Example: add your class initialization code
-        # Replace this with your actual code
-        self.model = None  
-
-    def predict(self, X):
-        # Replace with actual prediction logic
-        # Here we just return a dummy prediction for demonstration
-        # In your actual class, this should run your SVM/prediction
-        return ["No car detected"]
-
-# =========================
-# Load the trained model
-# =========================
-@st.cache_resource  # Cache to avoid reloading every time
+@st.cache_resource
 def load_model():
-    with open("parking_detection_model.pkl", "rb") as f:
-        model = pickle.load(f)
-    return model
+    data = joblib.load("parking_detection_model.pkl")
+    return data["svm_model"], data["bg_subtractor"]
 
-model = load_model()
+model, bg_sub = load_model()
 
-# =========================
-# Page layout
-# =========================
-st.set_page_config(page_title="Smart Parking Detection", page_icon="🚗", layout="wide")
 st.title("🚗 Smart Parking Detection")
-st.write("Upload an image of a parking lot to detect parking availability.")
 
-# =========================
-# File uploader
-# =========================
-uploaded_file = st.file_uploader("Choose an image file", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader("Upload image", type=["jpg", "png", "jpeg"])
 
-# =========================
-# Preprocess image for the model
-# =========================
-def preprocess_image(image: Image.Image):
-    img_array = np.array(image)
-    # Resize to model input size (adjust if your model expects a different size)
-    img_resized = cv2.resize(img_array, (224, 224))
-    # Normalize if your model was trained on [0,1]
-    img_normalized = img_resized / 255.0
-    # Add batch dimension
-    img_input = np.expand_dims(img_normalized, axis=0)
-    return img_input
-
-# =========================
-# Prediction logic
-# =========================
-if uploaded_file is not None:
-    # Display uploaded image
+if uploaded_file:
     image = Image.open(uploaded_file).convert("RGB")
-    st.image(image, caption="Uploaded Image", use_column_width=True)
+    img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+    img = cv2.resize(img, (64, 64))
 
-    # Preprocess and predict
-    input_data = preprocess_image(image)
-    prediction = model.predict(input_data)
-    
-    st.success(f"Prediction: {prediction[0]}")
+    foreground, mask = bg_sub.apply(img)
+    features = bg_sub.extract_features(img, mask).reshape(1, -1)
 
-# =========================
-# Video support placeholder
-# =========================
-st.info("Video upload support coming soon! For now, please upload images.")
+    pred = model.predict(features)[0]
+    prob = model.predict_proba(features)[0][pred]
+
+    label = "Occupied 🚗" if pred == 1 else "Empty 🅿️"
+    st.success(f"{label} ({prob*100:.2f}% confidence)")
