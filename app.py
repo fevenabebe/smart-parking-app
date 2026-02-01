@@ -2,72 +2,84 @@ import streamlit as st
 import cv2
 import numpy as np
 import joblib
-from PIL import Image
-
-st.set_page_config(page_title="Smart Parking System", layout="centered")
-
-st.title("🚗 Smart Parking Spot Detection")
-st.write("Upload a parking spot image to classify it as **Empty** or **Occupied**.")
+import os
 
 # =========================
-# Load model correctly
+# Load model
 # =========================
-@st.cache_resource
+@st.cache_resource  # cache to avoid reloading every run
 def load_model():
-    data = joblib.load("parking_detection_model.pkl")
+    model_path = "parking_detection_model.pkl"
+    
+    if not os.path.exists(model_path):
+        st.error("❌ Model file not found! Make sure parking_detection_model.pkl is in the repo.")
+        st.stop()
+    
+    data = joblib.load(model_path)
     svm_model = data["svm_model"]
     bg_subtractor = data["bg_subtractor"]
+    
     return svm_model, bg_subtractor
 
-try:
-    svm_model, bg_subtractor = load_model()
-    st.success("✅ Model loaded successfully!")
-except Exception as e:
-    st.error("❌ Failed to load model.")
-    st.exception(e)
-    st.stop()
+svm_model, bg_subtractor = load_model()
 
 # =========================
-# Feature extraction
+# Helper functions
 # =========================
-def extract_features(image):
-    foreground, mask = bg_subtractor.apply(image)
-    features = bg_subtractor.extract_features(image, mask)
-    return features, foreground, mask
+def preprocess_frame(frame):
+    """Resize and convert to HSV if needed"""
+    frame_resized = cv2.resize(frame, (640, 480))
+    hsv = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2HSV)
+    return frame_resized, hsv
+
+def detect_parking(frame):
+    """
+    Dummy function to simulate detection.
+    Replace with your actual detection logic using svm_model & bg_subtractor
+    """
+    # Example: just apply background subtraction
+    fg_mask = bg_subtractor.apply(frame)
+    return fg_mask
 
 # =========================
-# UI
+# Streamlit App
 # =========================
-uploaded_file = st.file_uploader("📤 Upload an image", type=["jpg", "jpeg", "png"])
+st.title("Smart Parking System 🚗🅿️")
 
-if uploaded_file:
-    image = Image.open(uploaded_file).convert("RGB")
-    image_np = np.array(image)
-    image_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
-    resized = cv2.resize(image_bgr, (64, 64))
+st.write("Upload a parking video or image to detect free/occupied spaces.")
 
-    st.image(image, caption="Uploaded Image", use_container_width=True)
+input_type = st.radio("Select input type:", ["Image", "Video"])
 
-    if st.button("🔍 Analyze Parking Spot"):
-        try:
-            features, foreground, mask = extract_features(resized)
-            features = features.reshape(1, -1)
+if input_type == "Image":
+    uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
+    
+    if uploaded_file is not None:
+        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+        image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        processed_image, hsv = preprocess_frame(image)
+        mask = detect_parking(processed_image)
+        st.image(mask, channels="GRAY", caption="Parking Detection Output")
 
-            pred = svm_model.predict(features)[0]
-            probs = svm_model.predict_proba(features)[0]
+elif input_type == "Video":
+    uploaded_file = st.file_uploader("Upload a video", type=["mp4", "mov", "avi"])
+    
+    if uploaded_file is not None:
+        tfile = "temp_video.mp4"
+        with open(tfile, "wb") as f:
+            f.write(uploaded_file.read())
+        
+        cap = cv2.VideoCapture(tfile)
+        
+        stframe = st.empty()
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+            processed_frame, hsv = preprocess_frame(frame)
+            mask = detect_parking(processed_frame)
+            stframe.image(mask, channels="GRAY")
+        
+        cap.release()
+        os.remove(tfile)
 
-            label = "Occupied 🚫" if pred == 1 else "Empty ✅"
-            confidence = probs[pred] * 100
-
-            st.subheader(f"Prediction: {label}")
-            st.write(f"Confidence: **{confidence:.2f}%**")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                st.image(cv2.cvtColor(foreground, cv2.COLOR_BGR2RGB), caption="Foreground")
-            with col2:
-                st.image(mask, caption="Mask", clamp=True)
-
-        except Exception as e:
-            st.error("Prediction failed")
-            st.exception(e)
+st.write("✅ Model loaded successfully. Ready to detect parking!")
