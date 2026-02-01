@@ -1,85 +1,70 @@
 import streamlit as st
+import joblib
 import cv2
 import numpy as np
-import joblib
-import os
+
+# =========================
+# Custom classes (needed to unpickle model)
+# =========================
+class BackgroundSubtractionSVM:
+    def __init__(self):
+        # Initialize SVM-related attributes if needed
+        pass
+
+    def predict(self, X):
+        # Dummy method; real implementation used during training
+        return np.zeros(len(X))
+
+class BackgroundSubtractor:
+    def __init__(self):
+        # Initialize background subtraction attributes
+        pass
+
+    def apply(self, frame):
+        # Dummy method; real implementation used during training
+        return np.zeros_like(frame)
 
 # =========================
 # Load model
 # =========================
-@st.cache_resource  # cache to avoid reloading every run
+@st.cache_resource  # Cache to avoid reloading every time
 def load_model():
-    model_path = "parking_detection_model.pkl"
-    
-    if not os.path.exists(model_path):
-        st.error("❌ Model file not found! Make sure parking_detection_model.pkl is in the repo.")
-        st.stop()
-    
-    data = joblib.load(model_path)
-    svm_model = data["svm_model"]
-    bg_subtractor = data["bg_subtractor"]
-    
-    return svm_model, bg_subtractor
+    model = joblib.load("parking_detection_model.pkl")
+    return model
 
-svm_model, bg_subtractor = load_model()
+model_dict = load_model()
+svm_model = model_dict['svm_model']
+bg_subtractor = model_dict['bg_subtractor']
+accuracy = model_dict['accuracy']
+feature_names = model_dict['feature_names']
 
 # =========================
-# Helper functions
+# Streamlit page
 # =========================
-def preprocess_frame(frame):
-    """Resize and convert to HSV if needed"""
-    frame_resized = cv2.resize(frame, (640, 480))
-    hsv = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2HSV)
-    return frame_resized, hsv
+st.title("Smart Parking System")
+st.write(f"Model Accuracy: {accuracy*100:.2f}%")
 
-def detect_parking(frame):
-    """
-    Dummy function to simulate detection.
-    Replace with your actual detection logic using svm_model & bg_subtractor
-    """
-    # Example: just apply background subtraction
-    fg_mask = bg_subtractor.apply(frame)
-    return fg_mask
+# Video upload
+uploaded_file = st.file_uploader("Upload parking video", type=["mp4", "avi"])
 
-# =========================
-# Streamlit App
-# =========================
-st.title("Smart Parking System 🚗🅿️")
+if uploaded_file is not None:
+    tfile = uploaded_file
+    file_bytes = np.asarray(bytearray(tfile.read()), dtype=np.uint8)
+    cap = cv2.VideoCapture(cv2.imdecode(file_bytes, cv2.IMREAD_COLOR))
 
-st.write("Upload a parking video or image to detect free/occupied spaces.")
+    stframe = st.empty()
 
-input_type = st.radio("Select input type:", ["Image", "Video"])
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-if input_type == "Image":
-    uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
-    
-    if uploaded_file is not None:
-        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-        image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-        processed_image, hsv = preprocess_frame(image)
-        mask = detect_parking(processed_image)
-        st.image(mask, channels="GRAY", caption="Parking Detection Output")
+        # Example: apply background subtraction
+        fg_mask = bg_subtractor.apply(frame)
 
-elif input_type == "Video":
-    uploaded_file = st.file_uploader("Upload a video", type=["mp4", "mov", "avi"])
-    
-    if uploaded_file is not None:
-        tfile = "temp_video.mp4"
-        with open(tfile, "wb") as f:
-            f.write(uploaded_file.read())
-        
-        cap = cv2.VideoCapture(tfile)
-        
-        stframe = st.empty()
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
-            processed_frame, hsv = preprocess_frame(frame)
-            mask = detect_parking(processed_frame)
-            stframe.image(mask, channels="GRAY")
-        
-        cap.release()
-        os.remove(tfile)
+        # Display frame
+        stframe.image(frame, channels="BGR")
 
-st.write("✅ Model loaded successfully. Ready to detect parking!")
+    cap.release()
+else:
+    st.info("Please upload a video file to start detection.")
